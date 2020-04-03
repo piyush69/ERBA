@@ -1,124 +1,127 @@
-pragma solidity ^0.4.24;
+pragma solidity 0.6.2;
 
-interface ERC20
+import './SafeMath.sol';
+import './ERC223ReceivingContract.sol';
+import './ERC20.sol';
+import './ERC223.sol';
+
+contract ErbaToken is StandardToken
 {
-	function totalSupply() view external returns (uint _totalSupply);
-	function balanceOf(address _owner) view external returns (uint balance);
-	function transfer(address _to, uint _value) external returns (bool success);
-	function transferFrom(address _from, address _to, uint _value) external returns (bool success);
-	function approve(address _spender, uint _value) external returns (bool success);
-	function allowance(address _owner, address _spender) view external returns (uint remaining);
+	string public name = "Erba Cultivation, LLC";
+	string public symbol = "ERB";
+	uint8 public constant decimals = 18;
+	uint public constant DECIMALS_MULTIPLIER = 10**uint(decimals);
 
-	event Transfer(address indexed _from, address indexed _to, uint _value);
-	event Approval(address indexed _owner, address indexed _spender, uint _value);
+	constructor(address _owner) public
+	{
+		totalSupply = 10000000 * DECIMALS_MULTIPLIER;
+		balances[_owner] = totalSupply;
+	  	emit Transfer(address(0), _owner, totalSupply);
+	}
 }
 
-// change `Token` to desired token name
-contract Token is ERC20
+contract StandardToken is ERC20, ERC223
 {
-	string public name;
-	string public symbol;
-	uint public totalSupply;
-	uint8 public decimals = 18;
+	using SafeMath for uint256;
 
-	mapping (address => uint) public balanceOf;
-	mapping (address => mapping (address => uint)) public allowance;
+	uint256 public totalSupply;
 
-	event Burn(address indexed from, uint value);
+	mapping (address => uint256) internal balances;
+	mapping (address => mapping (address => uint256)) internal allowed;
 
-	constructor(uint initialSupply,string tokenName, string tokenSymbol, address _owner) public
+	event Burn(address indexed burner, uint256 value);
+
+	function transfer(address _to, uint256 _value) external override returns (bool)
 	{
-		totalSupply = initialSupply * 10 ** uint(decimals);
-		balanceOf[_owner] = totalSupply;
-		name = tokenName;
-		symbol = tokenSymbol;
+		require(_to != address(0));
+		require(_value <= balances[msg.sender]);
+		balances[msg.sender] = balances[msg.sender].sub(_value);
+		balances[_to] = balances[_to].add(_value);
+		emit Transfer(msg.sender, _to, _value);
+		return true;
 	}
 
-	function totalSupply() view external returns (uint _totalSupply)
+	function balanceOf (address _owner) public override view returns (uint256 balance)
 	{
-		return totalSupply;
-	}
-	function balanceOf(address _owner) view external returns (uint balance)
-	{
-		return balanceOf[_owner];
+		return balances[_owner];
 	}
 
-	function allowance(address _owner, address _spender) view external returns (uint remaining)
+	function transferFrom(address _from, address _to, uint256 _value) external override returns (bool)
 	{
-		return allowance[_owner][_spender];
-	}
-	function _transfer(address _from, address _to, uint _value) internal
-	{
-		require(_to != 0x0);
-		require(balanceOf[_from] >= _value);
-		require(balanceOf[_to] + _value > balanceOf[_to]);
+		require(_to != address(0));
+		require(_value <= balances[_from]);
+		require(_value <= allowed[_from][msg.sender]);
 
-		uint previousBalances = balanceOf[_from] + balanceOf[_to];
-		balanceOf[_from] -= _value;
-		balanceOf[_to] += _value;
-
+		balances[_from] = balances[_from].sub(_value);
+		balances[_to] = balances[_to].add(_value);
+		allowed[_from][msg.sender] = allowed[_from][msg.sender].sub(_value);
 		emit Transfer(_from, _to, _value);
-		assert(balanceOf[_from] + balanceOf[_to] == previousBalances);
-	}
-
-	function transfer(address _to, uint _value) public returns (bool success)
-	{
-		_transfer(msg.sender, _to, _value);
 		return true;
 	}
 
-	function transferFrom(address _from, address _to, uint _value) public returns (bool success)
+	function approve(address _spender, uint256 _value) external override returns (bool)
 	{
-		require(_value <= allowance[_from][msg.sender]);
-		allowance[_from][msg.sender] -= _value;
-		_transfer(_from, _to, _value);
+		allowed[msg.sender][_spender] = _value;
+		emit Approval(msg.sender, _spender, _value);
 		return true;
 	}
 
-	function increaseApproval(address _spender, uint _value) public returns(bool success)
+	function allowance(address _owner, address _spender) public override view returns (uint256)
 	{
-		allowance[msg.sender][_spender] = allowance[msg.sender][_spender] + (_value);
-		emit Approval(msg.sender, _spender, allowance[msg.sender][_spender]);
+		return allowed[_owner][_spender];
+	}
+
+	function increaseApproval(address _spender, uint256 _addedValue) external returns (bool)
+	{
+		allowed[msg.sender][_spender] = allowed[msg.sender][_spender].add(_addedValue);
+		emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
 		return true;
 	}
 
-	function decreaseApproval(address _spender, uint _value) public returns(bool success)
+	function decreaseApproval(address _spender, uint256 _subtractedValue) external returns (bool)
 	{
-		uint oldValue = allowance[msg.sender][_spender];
-		if(_value > oldValue)
+		uint256 oldValue = allowed[msg.sender][_spender];
+		if (_subtractedValue > oldValue)
 		{
-			allowance[msg.sender][_spender] = 0;
+			allowed[msg.sender][_spender] = 0;
 		}
 		else
 		{
-			allowance[msg.sender][_spender] = oldValue - _value;
+			allowed[msg.sender][_spender] = oldValue.sub(_subtractedValue);
 		}
-		emit Approval(msg.sender, _spender, allowance[msg.sender][_spender]);
+		emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
 		return true;
 	}
 
-	function burn(uint _value) public returns (bool success)
+	function transfer(address _to, uint256 _value, bytes calldata _data) external override
 	{
-		require(balanceOf[msg.sender] >= _value);
-		balanceOf[msg.sender] -= _value;
-		totalSupply -= _value;
+		require(_value > 0 );
+		if(isContract(_to))
+		{
+			ERC223ReceivingContract receiver = ERC223ReceivingContract(_to);
+			receiver.tokenFallback(msg.sender, _value, _data);
+		}
+		balances[msg.sender] = balances[msg.sender].sub(_value);
+		balances[_to] = balances[_to].add(_value);
+		emit Transfer(msg.sender, _to, _value, _data);
+	}
+
+	function isContract(address _addr) view private returns (bool is_contract)
+	{
+		uint256 length;
+		assembly
+		{
+			length := extcodesize(_addr)
+		}
+		return (length>0);
+	}
+
+	function burn(uint256 _value) external
+	{
+		require(_value <= balances[msg.sender]);
+
+		balances[msg.sender] = balances[msg.sender].sub(_value);
+		totalSupply = totalSupply.sub(_value);
 		emit Burn(msg.sender, _value);
-		return true;
-	}
-
-	function burnFrom(address _from, uint _value) public returns (bool success)
-	{
-		require(balanceOf[_from] >= _value);
-		require(_value <= allowance[_from][msg.sender]);
-		balanceOf[_from] -= _value;
-		allowance[_from][msg.sender] -= _value;
-		totalSupply -= _value;
-		emit Burn(_from, _value);
-		return true;
-	}
-
-	function () public
-	{
-		revert();
 	}
 }
